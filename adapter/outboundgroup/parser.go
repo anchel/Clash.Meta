@@ -31,6 +31,7 @@ type GroupCommonOption struct {
 	Interval            int      `group:"interval,omitempty"`
 	TestTimeout         int      `group:"timeout,omitempty"`
 	MaxFailedTimes      int      `group:"max-failed-times,omitempty"`
+	EmptyFallback       string   `group:"empty-fallback,omitempty"`
 	Lazy                bool     `group:"lazy,omitempty"`
 	DisableUDP          bool     `group:"disable-udp,omitempty"`
 	Filter              string   `group:"filter,omitempty"`
@@ -42,10 +43,6 @@ type GroupCommonOption struct {
 	IncludeAllProviders bool     `group:"include-all-providers,omitempty"`
 	Hidden              bool     `group:"hidden,omitempty"`
 	Icon                string   `group:"icon,omitempty"`
-
-	// removed configs, only for error logging
-	Interface   string `group:"interface-name,omitempty"`
-	RoutingMark int    `group:"routing-mark,omitempty"`
 }
 
 func ParseProxyGroup(config map[string]any, proxyMap map[string]C.Proxy, providersMap map[string]P.ProxyProvider, AllProxies []string, AllProviders []string) (C.ProxyAdapter, error) {
@@ -62,14 +59,25 @@ func ParseProxyGroup(config map[string]any, proxyMap map[string]C.Proxy, provide
 		return nil, errFormat
 	}
 
-	if groupOption.RoutingMark != 0 {
+	if _, ok := config["routing-mark"]; ok {
 		log.Errorln("The group [%s] with routing-mark configuration was removed, please set it directly on the proxy instead", groupOption.Name)
 	}
-	if groupOption.Interface != "" {
+	if _, ok := config["interface-name"]; ok {
 		log.Errorln("The group [%s] with interface-name configuration was removed, please set it directly on the proxy instead", groupOption.Name)
+	}
+	if _, ok := config["dialer-proxy"]; ok {
+		log.Errorln("The group [%s] with dialer-proxy configuration is not allowed, please set it directly on the proxy instead", groupOption.Name)
 	}
 
 	groupName := groupOption.Name
+
+	if groupOption.EmptyFallback == "" {
+		groupOption.EmptyFallback = "COMPATIBLE"
+	}
+	emptyFallback, ok := proxyMap[groupOption.EmptyFallback]
+	if !ok {
+		return nil, fmt.Errorf("%s: empty fallback proxy '%s' not found", groupName, groupOption.EmptyFallback)
+	}
 
 	providers := []P.ProxyProvider{}
 
@@ -99,7 +107,7 @@ func ParseProxyGroup(config map[string]any, proxyMap map[string]C.Proxy, provide
 			groupOption.Proxies = append(groupOption.Proxies, AllProxies...)
 		}
 		if len(groupOption.Proxies) == 0 && len(groupOption.Use) == 0 {
-			groupOption.Proxies = []string{"COMPATIBLE"}
+			groupOption.Proxies = []string{groupOption.EmptyFallback}
 		}
 	}
 
@@ -177,14 +185,14 @@ func ParseProxyGroup(config map[string]any, proxyMap map[string]C.Proxy, provide
 	switch groupOption.Type {
 	case "url-test":
 		opts := parseURLTestOption(config)
-		group = NewURLTest(groupOption, providers, opts...)
+		group = NewURLTest(groupOption, emptyFallback, providers, opts...)
 	case "select":
-		group = NewSelector(groupOption, providers)
+		group = NewSelector(groupOption, emptyFallback, providers)
 	case "fallback":
-		group = NewFallback(groupOption, providers)
+		group = NewFallback(groupOption, emptyFallback, providers)
 	case "load-balance":
 		strategy := parseStrategy(config)
-		return NewLoadBalance(groupOption, providers, strategy)
+		return NewLoadBalance(groupOption, emptyFallback, providers, strategy)
 	case "relay":
 		return nil, fmt.Errorf("%w: The group [%s] with relay type was removed, please using dialer-proxy instead", errType, groupName)
 	default:

@@ -41,18 +41,7 @@ const (
 )
 
 func WriteHeader(w io.Writer, hexPassword [KeyLength]byte, command Command, socks5Addr []byte) error {
-	// buf := pool.GetBuffer()
-	// defer pool.PutBuffer(buf)
-
-	// buf.Write(hexPassword[:])
-	// buf.Write(crlf)
-
-	// buf.WriteByte(command)
-	// buf.Write(socks5Addr)
-	// buf.Write(crlf)
-
-	// _, err := w.Write(buf.Bytes())
-	// return err
+	
 	buf := pool.GetBuffer()
 	defer pool.PutBuffer(buf)
 
@@ -165,7 +154,7 @@ type PacketConn struct {
 }
 
 func (pc *PacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-	return WritePacket(pc, socks5.ParseAddr(addr.String()), b)
+	return WritePacket(pc, socks5.ParseAddrToSocksAddr(addr), b)
 }
 
 func (pc *PacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
@@ -231,6 +220,12 @@ func (pc *PacketConn) WaitReadFrom() (data []byte, put func(), addr net.Addr, er
 		return nil, nil, nil, err
 	}
 	length := binary.BigEndian.Uint16(data)
+	if length > maxLength {
+		if put != nil {
+			put()
+		}
+		return nil, nil, nil, errors.New("packet invalid")
+	}
 
 	if length > 0 {
 		data = data[:length]
